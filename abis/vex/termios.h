@@ -112,7 +112,6 @@ struct termios {
 	speed_t c_ospeed;
 };
 
-/* The kernel takes speeds in bits per second, so a Bxxx constant is the speed itself */
 #define B0 0
 #define B50 50
 #define B75 75
