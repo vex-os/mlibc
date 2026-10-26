@@ -2,18 +2,66 @@
 #include <bits/ensure.h>
 #include <limits.h>
 #include <mlibc/all-sysdeps.hpp>
+#include <stddef.h>
 #include <stdint.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <sys/statvfs.h>
+#include <sys/utsname.h>
+#include <termios.h>
+#include <time.h>
 #include <vex/capability.h>
 #include <vex/fcntl.h>
 #include <vex/futex.h>
 #include <vex/ioctl.h>
 #include <vex/mman.h>
+#include <vex/stat.h>
+#include <vex/statvfs.h>
 #include <vex/syscall.h>
 #include <vex/termios.h>
 #include <vex/time.h>
+#include <vex/utsname.h>
 
 #include "syscall.hpp" // The architecture provides vex::syscall for up to six arguments
+
+// The sysdeps pass these structures between the kernel and the user program without a copy
+static_assert(sizeof(struct stat) == sizeof(struct __k_stat));
+static_assert(offsetof(struct stat, st_dev) == offsetof(struct __k_stat, st_dev));
+static_assert(offsetof(struct stat, st_ino) == offsetof(struct __k_stat, st_ino));
+static_assert(offsetof(struct stat, st_mode) == offsetof(struct __k_stat, st_mode));
+static_assert(offsetof(struct stat, st_nlink) == offsetof(struct __k_stat, st_nlink));
+static_assert(offsetof(struct stat, st_uid) == offsetof(struct __k_stat, st_uid));
+static_assert(offsetof(struct stat, st_gid) == offsetof(struct __k_stat, st_gid));
+static_assert(offsetof(struct stat, st_rdev) == offsetof(struct __k_stat, st_rdev));
+static_assert(offsetof(struct stat, st_size) == offsetof(struct __k_stat, st_size));
+static_assert(offsetof(struct stat, st_atim) == offsetof(struct __k_stat, st_atim));
+static_assert(offsetof(struct stat, st_mtim) == offsetof(struct __k_stat, st_mtim));
+static_assert(offsetof(struct stat, st_ctim) == offsetof(struct __k_stat, st_ctim));
+static_assert(offsetof(struct stat, st_blksize) == offsetof(struct __k_stat, st_blksize));
+static_assert(offsetof(struct stat, st_blocks) == offsetof(struct __k_stat, st_blocks));
+
+static_assert(sizeof(struct timespec) == sizeof(struct __k_timespec));
+static_assert(offsetof(struct timespec, tv_sec) == offsetof(struct __k_timespec, tv_sec));
+static_assert(offsetof(struct timespec, tv_nsec) == offsetof(struct __k_timespec, tv_nsec));
+static_assert(UTIME_NOW == __k_UTIME_NOW);
+static_assert(UTIME_OMIT == __k_UTIME_OMIT);
+
+static_assert(sizeof(struct termios) == sizeof(struct __k_termios));
+static_assert(offsetof(struct termios, c_iflag) == offsetof(struct __k_termios, c_iflag));
+static_assert(offsetof(struct termios, c_oflag) == offsetof(struct __k_termios, c_oflag));
+static_assert(offsetof(struct termios, c_cflag) == offsetof(struct __k_termios, c_cflag));
+static_assert(offsetof(struct termios, c_lflag) == offsetof(struct __k_termios, c_lflag));
+static_assert(offsetof(struct termios, c_cc) == offsetof(struct __k_termios, c_cc));
+static_assert(offsetof(struct termios, c_ispeed) == offsetof(struct __k_termios, c_ispeed));
+static_assert(offsetof(struct termios, c_ospeed) == offsetof(struct __k_termios, c_ospeed));
+static_assert(NCCS == __k_NCCS);
+
+// The user structure has a domain name field after these
+static_assert(offsetof(struct utsname, sysname) == offsetof(struct __k_utsname, sysname));
+static_assert(offsetof(struct utsname, nodename) == offsetof(struct __k_utsname, nodename));
+static_assert(offsetof(struct utsname, release) == offsetof(struct __k_utsname, release));
+static_assert(offsetof(struct utsname, version) == offsetof(struct __k_utsname, version));
+static_assert(offsetof(struct utsname, machine) == offsetof(struct __k_utsname, machine));
 
 static int vex_errno(intptr_t result)
 {
@@ -407,4 +455,312 @@ int mlibc::Sysdeps<GetGroups>::operator()(size_t size, gid_t* list, int* ret)
 int mlibc::Sysdeps<SetGroups>::operator()(size_t size, const gid_t* list)
 {
     return vex_syscall_errno(__k_SYS_SETGROUPS, size, reinterpret_cast<intptr_t>(list));
+}
+
+int mlibc::Sysdeps<Stat>::operator()(fsfd_target target, int fd, const char* path, int flags,
+    struct stat* statbuf)
+{
+    switch(target) {
+        case fsfd_target::fd:
+            return vex_syscall_errno(__k_SYS_FSTAT, fd, reinterpret_cast<intptr_t>(statbuf));
+        case fsfd_target::path:
+            return vex_syscall_errno(__k_SYS_FSTATAT, __k_AT_FDCWD,
+                reinterpret_cast<intptr_t>(path), reinterpret_cast<intptr_t>(statbuf), flags);
+        case fsfd_target::fd_path:
+            return vex_syscall_errno(__k_SYS_FSTATAT, fd, reinterpret_cast<intptr_t>(path),
+                reinterpret_cast<intptr_t>(statbuf), flags);
+        default:
+            return EINVAL;
+    }
+}
+
+int mlibc::Sysdeps<Openat>::operator()(int dirfd, const char* path, int flags, mode_t mode, int* fd)
+{
+    intptr_t result;
+    int error = vex_syscall_result(&result, __k_SYS_OPENAT, dirfd, reinterpret_cast<intptr_t>(path),
+        flags, mode);
+
+    if(error) {
+        return error;
+    }
+
+    *fd = result;
+    return 0;
+}
+
+int mlibc::Sysdeps<Dup>::operator()(int fd, int flags, int* newfd)
+{
+    if(flags & ~O_CLOEXEC) {
+        return EINVAL;
+    }
+
+    intptr_t result;
+    int error = vex_syscall_result(&result, __k_SYS_FCNTL, fd,
+        (flags & O_CLOEXEC) ? F_DUPFD_CLOEXEC : F_DUPFD, 0);
+
+    if(error) {
+        return error;
+    }
+
+    *newfd = result;
+    return 0;
+}
+
+// The call without flags does not fail when both descriptors are the same one
+int mlibc::Sysdeps<Dup2>::operator()(int fd, int flags, int newfd)
+{
+    if(flags == 0) {
+        return vex_syscall_errno(__k_SYS_DUP2, fd, newfd);
+    }
+
+    return vex_syscall_errno(__k_SYS_DUP3, fd, newfd, flags);
+}
+
+// Only the requests that the kernel knows take an argument, and it is an integer
+int mlibc::Sysdeps<Fcntl>::operator()(int fd, int request, va_list args, int* result)
+{
+    intptr_t argument = 0;
+
+    switch(request) {
+        case F_DUPFD:
+        case F_DUPFD_CLOEXEC:
+        case F_SETFD:
+        case F_SETFL:
+            argument = va_arg(args, int);
+            break;
+        case F_GETFD:
+        case F_GETFL:
+            break;
+        default:
+            return EINVAL;
+    }
+
+    intptr_t value;
+    int error = vex_syscall_result(&value, __k_SYS_FCNTL, fd, request, argument);
+
+    if(error) {
+        return error;
+    }
+
+    *result = value;
+    return 0;
+}
+
+int mlibc::Sysdeps<Ioctl>::operator()(int fd, unsigned long request, void* arg, int* result)
+{
+    intptr_t value;
+    int error = vex_syscall_result(&value, __k_SYS_IOCTL, fd, request,
+        reinterpret_cast<intptr_t>(arg));
+
+    if(error) {
+        return error;
+    }
+
+    *result = value;
+    return 0;
+}
+
+int mlibc::Sysdeps<Ftruncate>::operator()(int fd, size_t size)
+{
+    return vex_syscall_errno(__k_SYS_FTRUNCATE, fd, size);
+}
+
+int mlibc::Sysdeps<Fsync>::operator()(int fd)
+{
+    return vex_syscall_errno(__k_SYS_FSYNC, fd);
+}
+
+// The kernel has no call that skips the metadata
+int mlibc::Sysdeps<Fdatasync>::operator()(int fd)
+{
+    return vex_syscall_errno(__k_SYS_FSYNC, fd);
+}
+
+int mlibc::Sysdeps<Mkdirat>::operator()(int dirfd, const char* path, mode_t mode)
+{
+    return vex_syscall_errno(__k_SYS_MKDIRAT, dirfd, reinterpret_cast<intptr_t>(path), mode);
+}
+
+int mlibc::Sysdeps<Mkdir>::operator()(const char* path, mode_t mode)
+{
+    return sysdep<Mkdirat>(__k_AT_FDCWD, path, mode);
+}
+
+int mlibc::Sysdeps<Unlinkat>::operator()(int dirfd, const char* path, int flags)
+{
+    return vex_syscall_errno(__k_SYS_UNLINKAT, dirfd, reinterpret_cast<intptr_t>(path), flags);
+}
+
+int mlibc::Sysdeps<Rmdir>::operator()(const char* path)
+{
+    return sysdep<Unlinkat>(__k_AT_FDCWD, path, __k_AT_REMOVEDIR);
+}
+
+int mlibc::Sysdeps<Renameat>::operator()(int olddirfd, const char* old_path, int newdirfd,
+    const char* new_path)
+{
+    return vex_syscall_errno(__k_SYS_RENAMEAT, olddirfd, reinterpret_cast<intptr_t>(old_path),
+        newdirfd, reinterpret_cast<intptr_t>(new_path));
+}
+
+int mlibc::Sysdeps<Rename>::operator()(const char* path, const char* new_path)
+{
+    return sysdep<Renameat>(__k_AT_FDCWD, path, __k_AT_FDCWD, new_path);
+}
+
+int mlibc::Sysdeps<Linkat>::operator()(int olddirfd, const char* old_path, int newdirfd,
+    const char* new_path, int flags)
+{
+    return vex_syscall_errno(__k_SYS_LINKAT, olddirfd, reinterpret_cast<intptr_t>(old_path),
+        newdirfd, reinterpret_cast<intptr_t>(new_path), flags);
+}
+
+int mlibc::Sysdeps<Link>::operator()(const char* old_path, const char* new_path)
+{
+    return sysdep<Linkat>(__k_AT_FDCWD, old_path, __k_AT_FDCWD, new_path, 0);
+}
+
+int mlibc::Sysdeps<Symlinkat>::operator()(const char* target_path, int dirfd, const char* link_path)
+{
+    return vex_syscall_errno(__k_SYS_SYMLINKAT, reinterpret_cast<intptr_t>(target_path), dirfd,
+        reinterpret_cast<intptr_t>(link_path));
+}
+
+int mlibc::Sysdeps<Symlink>::operator()(const char* target_path, const char* link_path)
+{
+    return sysdep<Symlinkat>(target_path, __k_AT_FDCWD, link_path);
+}
+
+int mlibc::Sysdeps<Readlinkat>::operator()(int dirfd, const char* path, void* buffer,
+    size_t max_size, ssize_t* length)
+{
+    intptr_t result;
+    int error = vex_syscall_result(&result, __k_SYS_READLINKAT, dirfd,
+        reinterpret_cast<intptr_t>(path), reinterpret_cast<intptr_t>(buffer), max_size);
+
+    if(error) {
+        return error;
+    }
+
+    *length = result;
+    return 0;
+}
+
+int mlibc::Sysdeps<Readlink>::operator()(const char* path, void* buffer, size_t max_size,
+    ssize_t* length)
+{
+    return sysdep<Readlinkat>(__k_AT_FDCWD, path, buffer, max_size, length);
+}
+
+int mlibc::Sysdeps<Fchmodat>::operator()(int dirfd, const char* path, mode_t mode, int flags)
+{
+    return vex_syscall_errno(__k_SYS_FCHMODAT, dirfd, reinterpret_cast<intptr_t>(path), mode,
+        flags);
+}
+
+int mlibc::Sysdeps<Chmod>::operator()(const char* path, mode_t mode)
+{
+    return sysdep<Fchmodat>(__k_AT_FDCWD, path, mode, 0);
+}
+
+int mlibc::Sysdeps<Fchmod>::operator()(int fd, mode_t mode)
+{
+    return sysdep<Fchmodat>(fd, "", mode, __k_AT_EMPTY_PATH);
+}
+
+int mlibc::Sysdeps<Fchownat>::operator()(int dirfd, const char* path, uid_t owner, gid_t group,
+    int flags)
+{
+    return vex_syscall_errno(__k_SYS_FCHOWNAT, dirfd, reinterpret_cast<intptr_t>(path), owner,
+        group, flags);
+}
+
+// A null path stands for the descriptor itself, as in futimens
+int mlibc::Sysdeps<Utimensat>::operator()(int dirfd, const char* path,
+    const struct timespec times[2], int flags)
+{
+    if(path == nullptr) {
+        path = "";
+        flags |= __k_AT_EMPTY_PATH;
+    }
+
+    return vex_syscall_errno(__k_SYS_UTIMENSAT, dirfd, reinterpret_cast<intptr_t>(path),
+        reinterpret_cast<intptr_t>(times), flags);
+}
+
+int mlibc::Sysdeps<Chdir>::operator()(const char* path)
+{
+    return vex_syscall_errno(__k_SYS_CHDIR, reinterpret_cast<intptr_t>(path));
+}
+
+int mlibc::Sysdeps<Fchdir>::operator()(int fd)
+{
+    return vex_syscall_errno(__k_SYS_FCHDIR, fd);
+}
+
+// The kernel does not report a domain name, so that field stays empty
+int mlibc::Sysdeps<Uname>::operator()(struct utsname* buf)
+{
+    struct __k_utsname name;
+    int error = vex_syscall_errno(__k_SYS_UNAME, reinterpret_cast<intptr_t>(&name));
+
+    if(error) {
+        return error;
+    }
+
+    memset(buf, 0, sizeof(*buf));
+    memcpy(buf->sysname, name.sysname, sizeof(name.sysname));
+    memcpy(buf->nodename, name.nodename, sizeof(name.nodename));
+    memcpy(buf->release, name.release, sizeof(name.release));
+    memcpy(buf->version, name.version, sizeof(name.version));
+    memcpy(buf->machine, name.machine, sizeof(name.machine));
+
+    // TODO: get this from the kernel?
+    strncpy(buf->domainname, "skibidisigma6767", sizeof(buf->domainname));
+
+    return 0;
+}
+
+int mlibc::Sysdeps<Fstatvfs>::operator()(int fd, struct statvfs* out)
+{
+    struct __k_statvfs info;
+    int error = vex_syscall_errno(__k_SYS_STATVFS, fd, reinterpret_cast<intptr_t>(&info));
+
+    if(error) {
+        return error;
+    }
+
+    memset(out, 0, sizeof(*out));
+    out->f_bsize = info.f_bsize;
+    out->f_frsize = info.f_frsize;
+    out->f_blocks = info.f_blocks;
+    out->f_bfree = info.f_bfree;
+    out->f_bavail = info.f_bavail;
+    out->f_files = info.f_files;
+    out->f_ffree = info.f_ffree;
+    out->f_favail = info.f_favail;
+    out->f_fsid = info.f_fsid;
+    out->f_flag = info.f_flag;
+    out->f_namemax = info.f_namemax;
+    return 0;
+}
+
+// The kernel takes a descriptor only, so the path goes through an open file
+int mlibc::Sysdeps<Statvfs>::operator()(const char* path, struct statvfs* out)
+{
+    int fd;
+    int error = sysdep<Openat>(__k_AT_FDCWD, path, O_RDONLY | O_CLOEXEC, 0, &fd);
+
+    if(error) {
+        return error;
+    }
+
+    error = sysdep<Fstatvfs>(fd, out);
+    sysdep<Close>(fd);
+    return error;
+}
+
+void mlibc::Sysdeps<Sync>::operator()()
+{
+    vex::syscall(__k_SYS_SYNC);
 }
