@@ -840,3 +840,39 @@ int mlibc::Sysdeps<ReadEntries>::operator()(int handle, void* buffer, size_t max
     *bytes_read = result;
     return 0;
 }
+
+// The child gets zero from the kernel
+int mlibc::Sysdeps<Fork>::operator()(pid_t* child)
+{
+    intptr_t result;
+    int error = vex_syscall_result(&result, __k_SYS_FORK);
+
+    if(error) {
+        return error;
+    }
+
+    *child = result;
+    return 0;
+}
+
+// The call returns only when it fails
+int mlibc::Sysdeps<Execve>::operator()(const char* path, char* const argv[], char* const envp[])
+{
+    return vex_syscall_errno(__k_SYS_EXEC, reinterpret_cast<intptr_t>(path),
+        reinterpret_cast<intptr_t>(argv), reinterpret_cast<intptr_t>(envp));
+}
+
+void mlibc::Sysdeps<Yield>::operator()()
+{
+    vex::syscall(__k_SYS_YIELD);
+}
+
+int mlibc::Sysdeps<Kill>::operator()(pid_t pid, int sig)
+{
+    return vex_syscall_errno(__k_SYS_KILL, pid, sig);
+}
+
+int mlibc::Sysdeps<Tgkill>::operator()(int tgid, int tid, int sig)
+{
+    return vex_syscall_errno(__k_SYS_TGKILL, tgid, tid, sig);
+}

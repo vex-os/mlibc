@@ -81,7 +81,12 @@ struct VexSysdepTags
       Access,
       Faccessat,
       OpenDir,
-      ReadEntries {};
+      ReadEntries,
+      Fork,
+      Execve,
+      Yield,
+      Kill,
+      Tgkill {};
 } // namespace mlibc
 
 namespace mlibc
