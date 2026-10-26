@@ -58,7 +58,11 @@ typedef void (*__sighandler)(int);
 #define SIGWINCH   __k_SIGWINCH
 #define SIGSYS     __k_SIGSYS
 #define SIGINFO    __k_SIGINFO
+#define SIGIO      __k_SIGIO
+#define SIGPWR     __k_SIGPWR
+
 #define SIGIOT SIGABRT
+#define SIGPOLL SIGIO
 
 /* The first real-time signals belong to the C library: SIGCANCEL and a spare one */
 #define SIGCANCEL __k_SIGRTMIN
