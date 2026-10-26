@@ -16,6 +16,7 @@
 #define O_DIRECTORY  __k_O_DIRECTORY
 #define O_NOFOLLOW   __k_O_NOFOLLOW
 #define O_CLOEXEC    __k_O_CLOEXEC
+#define O_ACCMODE    __k_O_ACCMODE
 
 /* The kernel ignores these flags */
 #define O_NOCTTY     0x0400
@@ -31,7 +32,6 @@
 #define O_RSYNC      O_SYNC
 #define O_EXEC       O_PATH
 #define O_SEARCH     O_PATH
-#define O_ACCMODE    O_RDWR
 
 #define F_DUPFD          __k_F_DUPFD
 #define F_GETFD          __k_F_GETFD
