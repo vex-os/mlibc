@@ -4,6 +4,7 @@
 #include <mlibc/all-sysdeps.hpp>
 #include <stdint.h>
 #include <string.h>
+#include <vex/capability.h>
 #include <vex/fcntl.h>
 #include <vex/futex.h>
 #include <vex/ioctl.h>
@@ -201,4 +202,209 @@ int mlibc::Sysdeps<Isatty>::operator()(int fd)
     }
 
     return ENOTTY;
+}
+
+int mlibc::Sysdeps<Umask>::operator()(mode_t mode, mode_t* old)
+{
+    intptr_t result;
+    int error = vex_syscall_result(&result, __k_SYS_SETUMASK, mode);
+
+    if(error) {
+        return error;
+    }
+
+    *old = result;
+    return 0;
+}
+
+// The calls below cannot fail for the calling process
+pid_t mlibc::Sysdeps<GetPid>::operator()()
+{
+    return vex::syscall(__k_SYS_GETPID);
+}
+
+pid_t mlibc::Sysdeps<GetPpid>::operator()()
+{
+    return vex::syscall(__k_SYS_GETPPID);
+}
+
+pid_t mlibc::Sysdeps<GetTid>::operator()()
+{
+    return vex::syscall(__k_SYS_GETTID);
+}
+
+// The kernel has no call for the real and
+// effective ids alone, so these read the whole triple
+uid_t mlibc::Sysdeps<GetUid>::operator()()
+{
+    uid_t ruid = 0, euid = 0, suid = 0;
+    sysdep<GetResuid>(&ruid, &euid, &suid);
+    return ruid;
+}
+
+uid_t mlibc::Sysdeps<GetEuid>::operator()()
+{
+    uid_t ruid = 0, euid = 0, suid = 0;
+    sysdep<GetResuid>(&ruid, &euid, &suid);
+    return euid;
+}
+
+gid_t mlibc::Sysdeps<GetGid>::operator()()
+{
+    gid_t rgid = 0, egid = 0, sgid = 0;
+    sysdep<GetResgid>(&rgid, &egid, &sgid);
+    return rgid;
+}
+
+gid_t mlibc::Sysdeps<GetEgid>::operator()()
+{
+    gid_t rgid = 0, egid = 0, sgid = 0;
+    sysdep<GetResgid>(&rgid, &egid, &sgid);
+    return egid;
+}
+
+int mlibc::Sysdeps<GetResuid>::operator()(uid_t* ruid, uid_t* euid, uid_t* suid)
+{
+    return vex_syscall_errno(__k_SYS_GETRESUID, reinterpret_cast<intptr_t>(ruid),
+        reinterpret_cast<intptr_t>(euid), reinterpret_cast<intptr_t>(suid));
+}
+
+int mlibc::Sysdeps<GetResgid>::operator()(gid_t* rgid, gid_t* egid, gid_t* sgid)
+{
+    return vex_syscall_errno(__k_SYS_GETRESGID, reinterpret_cast<intptr_t>(rgid),
+        reinterpret_cast<intptr_t>(egid), reinterpret_cast<intptr_t>(sgid));
+}
+
+int mlibc::Sysdeps<SetResuid>::operator()(uid_t ruid, uid_t euid, uid_t suid)
+{
+    return vex_syscall_errno(__k_SYS_SETRESUID, ruid, euid, suid);
+}
+
+int mlibc::Sysdeps<SetResgid>::operator()(gid_t rgid, gid_t egid, gid_t sgid)
+{
+    return vex_syscall_errno(__k_SYS_SETRESGID, rgid, egid, sgid);
+}
+
+// An id of -1 stands for "leave as is" in the setres calls
+static constexpr intptr_t vex_id_unchanged = -1;
+
+// POSIX asks for the effective capability here, not for a user id of zero
+static int vex_capable(unsigned capability, bool* capable)
+{
+    struct __k_caps caps;
+    int error = vex_syscall_errno(__k_SYS_CAPGET, reinterpret_cast<intptr_t>(&caps));
+
+    if(error) {
+        return error;
+    }
+
+    *capable = caps.effective & __k_CAP_TO_MASK(capability);
+    return 0;
+}
+
+// A privileged caller sets all three ids,
+// any other caller sets the effective one only
+int mlibc::Sysdeps<SetUid>::operator()(uid_t uid)
+{
+    bool capable;
+    int error = vex_capable(__k_CAP_SETUID, &capable);
+
+    if(error) {
+        return error;
+    }
+
+    if(capable) {
+        return sysdep<SetResuid>(uid, uid, uid);
+    }
+
+    return sysdep<SetResuid>(vex_id_unchanged, uid, vex_id_unchanged);
+}
+
+int mlibc::Sysdeps<SetEuid>::operator()(uid_t euid)
+{
+    return sysdep<SetResuid>(vex_id_unchanged, euid, vex_id_unchanged);
+}
+
+int mlibc::Sysdeps<SetGid>::operator()(gid_t gid)
+{
+    bool capable;
+    int error = vex_capable(__k_CAP_SETGID, &capable);
+
+    if(error) {
+        return error;
+    }
+
+    if(capable) {
+        return sysdep<SetResgid>(gid, gid, gid);
+    }
+
+    return sysdep<SetResgid>(vex_id_unchanged, gid, vex_id_unchanged);
+}
+
+int mlibc::Sysdeps<SetEgid>::operator()(gid_t egid)
+{
+    return sysdep<SetResgid>(vex_id_unchanged, egid, vex_id_unchanged);
+}
+
+int mlibc::Sysdeps<GetPgid>::operator()(pid_t pid, pid_t* pgid)
+{
+    intptr_t result;
+    int error = vex_syscall_result(&result, __k_SYS_GETPGID, pid);
+
+    if(error) {
+        return error;
+    }
+
+    *pgid = result;
+    return 0;
+}
+
+int mlibc::Sysdeps<SetPgid>::operator()(pid_t pid, pid_t pgid)
+{
+    return vex_syscall_errno(__k_SYS_SETPGID, pid, pgid);
+}
+
+int mlibc::Sysdeps<GetSid>::operator()(pid_t pid, pid_t* sid)
+{
+    intptr_t result;
+    int error = vex_syscall_result(&result, __k_SYS_GETSID, pid);
+
+    if(error) {
+        return error;
+    }
+
+    *sid = result;
+    return 0;
+}
+
+int mlibc::Sysdeps<SetSid>::operator()(pid_t* sid)
+{
+    intptr_t result;
+    int error = vex_syscall_result(&result, __k_SYS_SETSID);
+
+    if(error) {
+        return error;
+    }
+
+    *sid = result;
+    return 0;
+}
+
+int mlibc::Sysdeps<GetGroups>::operator()(size_t size, gid_t* list, int* ret)
+{
+    intptr_t result;
+    int error = vex_syscall_result(&result, __k_SYS_GETGROUPS, size,
+        reinterpret_cast<intptr_t>(list));
+
+    if(error) {
+        return error;
+    }
+
+    *ret = result;
+    return 0;
+}
+
+int mlibc::Sysdeps<SetGroups>::operator()(size_t size, const gid_t* list)
+{
+    return vex_syscall_errno(__k_SYS_SETGROUPS, size, reinterpret_cast<intptr_t>(list));
 }

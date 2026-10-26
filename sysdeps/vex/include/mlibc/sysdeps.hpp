@@ -21,7 +21,29 @@ struct VexSysdepTags
       Open,
       VmMap,
       VmUnmap,
-      ClockGet {};
+      ClockGet,
+      GetPid,
+      GetPpid,
+      GetTid,
+      GetUid,
+      GetEuid,
+      GetGid,
+      GetEgid,
+      GetResuid,
+      GetResgid,
+      SetResuid,
+      SetResgid,
+      SetUid,
+      SetEuid,
+      SetGid,
+      SetEgid,
+      GetPgid,
+      SetPgid,
+      GetSid,
+      SetSid,
+      GetGroups,
+      SetGroups,
+      Umask {};
 } // namespace mlibc
 
 namespace mlibc
