@@ -87,7 +87,18 @@ struct VexSysdepTags
       Yield,
       Kill,
       Tgkill,
-      Sleep {};
+      Sleep,
+      Tcgetattr,
+      Tcsetattr,
+      Tcsendbreak,
+      Tcflow,
+      Tcflush,
+      Tcdrain,
+      Tcgetwinsize,
+      Tcsetwinsize,
+      Tcgetpgrp,
+      Tcsetpgrp,
+      Tcgetsid {};
 } // namespace mlibc
 
 namespace mlibc

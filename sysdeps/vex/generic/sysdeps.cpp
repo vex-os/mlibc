@@ -58,6 +58,12 @@ static_assert(offsetof(struct termios, c_ispeed) == offsetof(struct __k_termios,
 static_assert(offsetof(struct termios, c_ospeed) == offsetof(struct __k_termios, c_ospeed));
 static_assert(NCCS == __k_NCCS);
 
+static_assert(sizeof(struct winsize) == sizeof(struct __k_winsize));
+static_assert(offsetof(struct winsize, ws_row) == offsetof(struct __k_winsize, ws_row));
+static_assert(offsetof(struct winsize, ws_col) == offsetof(struct __k_winsize, ws_col));
+static_assert(offsetof(struct winsize, ws_xpixel) == offsetof(struct __k_winsize, ws_xpixel));
+static_assert(offsetof(struct winsize, ws_ypixel) == offsetof(struct __k_winsize, ws_ypixel));
+
 static_assert(sizeof(struct dirent) == sizeof(struct __k_dirent));
 static_assert(offsetof(struct dirent, d_ino) == offsetof(struct __k_dirent, d_ino));
 static_assert(offsetof(struct dirent, d_off) == offsetof(struct __k_dirent, d_off));
@@ -891,4 +897,92 @@ int mlibc::Sysdeps<Sleep>::operator()(time_t* secs, long* nanos)
     *secs = remaining.tv_sec;
     *nanos = remaining.tv_nsec;
     return error;
+}
+
+static int vex_ioctl(int fd, unsigned long request, intptr_t argument)
+{
+    return vex_syscall_errno(__k_SYS_IOCTL, fd, request, argument);
+}
+
+int mlibc::Sysdeps<Tcgetattr>::operator()(int fd, struct termios* attr)
+{
+    return vex_ioctl(fd, __k_TCGETS, reinterpret_cast<intptr_t>(attr));
+}
+
+int mlibc::Sysdeps<Tcsetattr>::operator()(int fd, int optional_action, const struct termios* attr)
+{
+    switch(optional_action) {
+        case TCSANOW:
+            return vex_ioctl(fd, __k_TCSETS, reinterpret_cast<intptr_t>(attr));
+        case TCSADRAIN:
+            return vex_ioctl(fd, __k_TCSETSW, reinterpret_cast<intptr_t>(attr));
+        case TCSAFLUSH:
+            return vex_ioctl(fd, __k_TCSETSF, reinterpret_cast<intptr_t>(attr));
+        default:
+            return EINVAL;
+    }
+}
+
+int mlibc::Sysdeps<Tcsendbreak>::operator()(int fd, int duration)
+{
+    __k_int32_t value = duration;
+    return vex_ioctl(fd, __k_TCSENDBREAK, reinterpret_cast<intptr_t>(&value));
+}
+
+int mlibc::Sysdeps<Tcflow>::operator()(int fd, int action)
+{
+    __k_int32_t value = action;
+    return vex_ioctl(fd, __k_TCXONC, reinterpret_cast<intptr_t>(&value));
+}
+
+int mlibc::Sysdeps<Tcflush>::operator()(int fd, int queue)
+{
+    __k_int32_t value = queue;
+    return vex_ioctl(fd, __k_TCFLSH, reinterpret_cast<intptr_t>(&value));
+}
+
+int mlibc::Sysdeps<Tcdrain>::operator()(int fd)
+{
+    return vex_ioctl(fd, __k_TCDRAIN, 0);
+}
+
+int mlibc::Sysdeps<Tcgetwinsize>::operator()(int fd, struct winsize* winsz)
+{
+    return vex_ioctl(fd, __k_TIOCGWINSZ, reinterpret_cast<intptr_t>(winsz));
+}
+
+int mlibc::Sysdeps<Tcsetwinsize>::operator()(int fd, const struct winsize* winsz)
+{
+    return vex_ioctl(fd, __k_TIOCSWINSZ, reinterpret_cast<intptr_t>(winsz));
+}
+
+// The callers of these three take a negative number for an error
+pid_t mlibc::Sysdeps<Tcgetpgrp>::operator()(int fd)
+{
+    __k_pid_t group;
+    int error = vex_ioctl(fd, __k_TIOCGPGRP, reinterpret_cast<intptr_t>(&group));
+
+    if(error) {
+        return -error;
+    }
+
+    return group;
+}
+
+int mlibc::Sysdeps<Tcsetpgrp>::operator()(int fd, pid_t group)
+{
+    __k_pid_t value = group;
+    return -vex_ioctl(fd, __k_TIOCSPGRP, reinterpret_cast<intptr_t>(&value));
+}
+
+pid_t mlibc::Sysdeps<Tcgetsid>::operator()(int fd)
+{
+    __k_pid_t session;
+    int error = vex_ioctl(fd, __k_TIOCGSID, reinterpret_cast<intptr_t>(&session));
+
+    if(error) {
+        return -error;
+    }
+
+    return session;
 }
