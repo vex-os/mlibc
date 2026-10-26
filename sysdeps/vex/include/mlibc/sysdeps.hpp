@@ -75,7 +75,13 @@ struct VexSysdepTags
       Uname,
       Statvfs,
       Fstatvfs,
-      Sync {};
+      Sync,
+      Waitpid,
+      GetCwd,
+      Access,
+      Faccessat,
+      OpenDir,
+      ReadEntries {};
 } // namespace mlibc
 
 namespace mlibc

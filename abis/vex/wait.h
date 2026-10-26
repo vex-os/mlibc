@@ -5,7 +5,7 @@
 #include <vex/wait.h>
 
 /* TODO: the kernel has no job control in waitpid yet, so stopped and continued never show up */
-#define WNOHANG 1
+#define WNOHANG __k_WNOHANG
 #define WUNTRACED 2
 #define WSTOPPED 2
 #define WEXITED 4

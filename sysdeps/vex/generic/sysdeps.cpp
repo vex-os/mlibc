@@ -1,5 +1,6 @@
 #include <abi-bits/errno.h>
 #include <bits/ensure.h>
+#include <dirent.h>
 #include <limits.h>
 #include <mlibc/all-sysdeps.hpp>
 #include <stddef.h>
@@ -11,6 +12,7 @@
 #include <termios.h>
 #include <time.h>
 #include <vex/capability.h>
+#include <vex/dirent.h>
 #include <vex/fcntl.h>
 #include <vex/futex.h>
 #include <vex/ioctl.h>
@@ -55,6 +57,22 @@ static_assert(offsetof(struct termios, c_cc) == offsetof(struct __k_termios, c_c
 static_assert(offsetof(struct termios, c_ispeed) == offsetof(struct __k_termios, c_ispeed));
 static_assert(offsetof(struct termios, c_ospeed) == offsetof(struct __k_termios, c_ospeed));
 static_assert(NCCS == __k_NCCS);
+
+static_assert(sizeof(struct dirent) == sizeof(struct __k_dirent));
+static_assert(offsetof(struct dirent, d_ino) == offsetof(struct __k_dirent, d_ino));
+static_assert(offsetof(struct dirent, d_off) == offsetof(struct __k_dirent, d_off));
+static_assert(offsetof(struct dirent, d_reclen) == offsetof(struct __k_dirent, d_reclen));
+static_assert(offsetof(struct dirent, d_type) == offsetof(struct __k_dirent, d_type));
+static_assert(offsetof(struct dirent, d_name) == offsetof(struct __k_dirent, d_name));
+
+static_assert(DT_UNKNOWN == __k_DT_UNKNOWN);
+static_assert(DT_FIFO == __k_DT_FIFO);
+static_assert(DT_CHR == __k_DT_CHR);
+static_assert(DT_DIR == __k_DT_DIR);
+static_assert(DT_BLK == __k_DT_BLK);
+static_assert(DT_REG == __k_DT_REG);
+static_assert(DT_LNK == __k_DT_LNK);
+static_assert(DT_SOCK == __k_DT_SOCK);
 
 // The user structure has a domain name field after these
 static_assert(offsetof(struct utsname, sysname) == offsetof(struct __k_utsname, sysname));
@@ -763,4 +781,62 @@ int mlibc::Sysdeps<Statvfs>::operator()(const char* path, struct statvfs* out)
 void mlibc::Sysdeps<Sync>::operator()()
 {
     vex::syscall(__k_SYS_SYNC);
+}
+
+// The kernel returns zero when the child still runs and the call does not block
+int mlibc::Sysdeps<Waitpid>::operator()(pid_t pid, int* status, int flags, struct rusage* ru,
+    pid_t* ret_pid)
+{
+    intptr_t result;
+    int error = vex_syscall_result(&result, __k_SYS_WAITPID, pid,
+        reinterpret_cast<intptr_t>(status), flags);
+
+    if(error) {
+        return error;
+    }
+
+    // The kernel does not count resources yet
+    if(ru) {
+        memset(ru, 0, sizeof(*ru));
+    }
+
+    *ret_pid = result;
+    return 0;
+}
+
+int mlibc::Sysdeps<GetCwd>::operator()(char* buffer, size_t size)
+{
+    return vex_syscall_errno(__k_SYS_GETCWD, reinterpret_cast<intptr_t>(buffer), size);
+}
+
+int mlibc::Sysdeps<Faccessat>::operator()(int dirfd, const char* pathname, int mode, int flags)
+{
+    return vex_syscall_errno(__k_SYS_FACCESSAT, dirfd, reinterpret_cast<intptr_t>(pathname), mode,
+        flags);
+}
+
+int mlibc::Sysdeps<Access>::operator()(const char* path, int mode)
+{
+    return sysdep<Faccessat>(__k_AT_FDCWD, path, mode, 0);
+}
+
+int mlibc::Sysdeps<OpenDir>::operator()(const char* path, int* handle)
+{
+    return sysdep<Openat>(__k_AT_FDCWD, path, O_RDONLY | O_DIRECTORY | O_CLOEXEC, 0, handle);
+}
+
+// The records are those of struct dirent, so they go to the caller as they are
+int mlibc::Sysdeps<ReadEntries>::operator()(int handle, void* buffer, size_t max_size,
+    size_t* bytes_read)
+{
+    intptr_t result;
+    int error = vex_syscall_result(&result, __k_SYS_GETDENTS, handle,
+        reinterpret_cast<intptr_t>(buffer), max_size);
+
+    if(error) {
+        return error;
+    }
+
+    *bytes_read = result;
+    return 0;
 }
