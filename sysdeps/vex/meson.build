@@ -9,6 +9,7 @@ rtld_include_dirs += include_directories(host_machine.cpu_family())
 
 libc_sources += files(
 	'generic/entry.cpp',
+	'generic/ioctl.cpp',
 	'generic/mount.cpp',
 	'generic/sysdeps.cpp',
 )
@@ -69,7 +70,7 @@ if not no_headers
 		subdir: 'abi-bits',
 		follow_symlinks: true,
 	)
-	install_headers('include/sys/mount.h', subdir: 'sys')
+	install_headers('include/sys/ioctl.h', 'include/sys/mount.h', subdir: 'sys')
 endif
 
 if not headers_only
