@@ -2,6 +2,17 @@ sysdep_supported_options = {
 	'posix': true,
 }
 
+rtld_sources += files(
+	'generic/sysdeps.cpp',
+)
+rtld_include_dirs += include_directories(host_machine.cpu_family())
+
+libc_sources += files(
+	'generic/entry.cpp',
+	'generic/sysdeps.cpp',
+)
+libc_include_dirs += include_directories(host_machine.cpu_family())
+
 if not no_headers
 	install_headers(
 		'include/abi-bits/access.h',
@@ -57,4 +68,21 @@ if not no_headers
 		subdir: 'abi-bits',
 		follow_symlinks: true,
 	)
+endif
+
+if not headers_only
+	crtstuff = ['crt1', 'crti', 'crtn']
+	foreach crtthing : crtstuff
+		crtf = crtthing + '.S'
+		crt_src = files(host_machine.cpu_family() / crtf)
+		crt = custom_target(
+			crtthing,
+			build_by_default: true,
+			command: c_compiler.cmd_array() + ['-c', '-o', '@OUTPUT@', '@INPUT@'],
+			input: crt_src,
+			output: crtthing + '.o',
+			install: true,
+			install_dir: get_option('libdir'),
+		)
+	endforeach
 endif
