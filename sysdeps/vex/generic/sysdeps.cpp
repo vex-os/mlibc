@@ -876,3 +876,19 @@ int mlibc::Sysdeps<Tgkill>::operator()(int tgid, int tid, int sig)
 {
     return vex_syscall_errno(__k_SYS_TGKILL, tgid, tid, sig);
 }
+
+// The time left comes back in the arguments, which is zero unless a signal ended the sleep
+int mlibc::Sysdeps<Sleep>::operator()(time_t* secs, long* nanos)
+{
+    struct __k_timespec request;
+    request.tv_sec = *secs;
+    request.tv_nsec = *nanos;
+
+    struct __k_timespec remaining = {};
+    int error = vex_syscall_errno(__k_SYS_SLEEP, reinterpret_cast<intptr_t>(&request),
+        reinterpret_cast<intptr_t>(&remaining));
+
+    *secs = remaining.tv_sec;
+    *nanos = remaining.tv_nsec;
+    return error;
+}

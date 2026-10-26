@@ -86,7 +86,8 @@ struct VexSysdepTags
       Execve,
       Yield,
       Kill,
-      Tgkill {};
+      Tgkill,
+      Sleep {};
 } // namespace mlibc
 
 namespace mlibc
